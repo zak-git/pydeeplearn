@@ -13,21 +13,21 @@ ctypedef np.float32_t DTYPE_t
 @cython.boundscheck(False)
 @cython.wraparound(False)
 def im2col(np.ndarray[DTYPE_t, ndim=4] im, int filterH, int filterW, int padding, int stride):
-    cdef int N = im.shape[0], C = im.shape[1], H = im.shape[2], W = im.shape[3]
-    cdef np.ndarray[DTYPE_t, ndim=4] im_padded = np.empty((N, C, H + 2 * padding, W + 2 * padding), dtype=DTYPE)
+    cdef int N = im.shape[0], H = im.shape[1], W = im.shape[2], C = im.shape[3]
+    cdef np.ndarray[DTYPE_t, ndim=4] im_padded = np.empty((N, H + 2 * padding, W + 2 * padding, C), dtype=DTYPE)
     if padding > 0:
-        im_padded[:, :, padding:-padding, padding:-padding] = im
+        im_padded[:, padding:-padding, padding:-padding, :] = im
         im_padded[:, :, :padding, :] = 0
         im_padded[:, :, -padding:, :] = 0
-        im_padded[:, :, :, :padding] = 0
-        im_padded[:, :, :, -padding:] = 0
+        im_padded[:, :padding, :, :] = 0
+        im_padded[:, -padding:,:, :] = 0
     else:
         im_padded[:] = im
     
     cdef int newH = (H + 2 * padding - filterH) / stride + 1
     cdef int newW = (W + 2 * padding - filterW) / stride + 1
     
-    cdef np.ndarray[DTYPE_t, ndim=2] col = np.empty((C * filterH * filterW, N * newH * newW), dtype=DTYPE)
+    cdef np.ndarray[DTYPE_t, ndim=2] col = np.empty((N * newH * newW, C * filterH * filterW), dtype=DTYPE)
     cdef int i, hj, wj, ci, hi, wi, c, r
     
     for hi in range(filterH):
@@ -38,7 +38,7 @@ def im2col(np.ndarray[DTYPE_t, ndim=4] im, int filterH, int filterW, int padding
                     for hj in range(newH):
                         for wj in range(newW):
                             c = i * newH * newH + hj * newW + wj
-                            col[r, c] = im_padded[i, ci, stride * hj + hi, stride * wj + wi]
+                            col[c,r] = im_padded[i, stride * hj + hi, stride * wj + wi,ci]
     return col
 
 @cython.boundscheck(False)
@@ -48,7 +48,7 @@ def col2im(np.ndarray[DTYPE_t, ndim=2] col, int N, int C, int H, int W,
     cdef int newH = (H + 2 * padding - filterH) / stride + 1
     cdef int newW = (W + 2 * padding - filterW) / stride + 1
     
-    cdef np.ndarray[DTYPE_t, ndim=4] im_padded = np.zeros((N, C, H + 2 * padding, W + 2 * padding), dtype=DTYPE)
+    cdef np.ndarray[DTYPE_t, ndim=4] im_padded = np.zeros((N, H + 2 * padding, W + 2 * padding, C), dtype=DTYPE)
     cdef int i, hj, wj, ci, hi, wi, c, r
     
     for ci in range(C):
@@ -59,10 +59,10 @@ def col2im(np.ndarray[DTYPE_t, ndim=2] col, int N, int C, int H, int W,
                     for hj in range(newH):
                         for wj in range(newW):
                             c = i * newH * newH + hj * newW + wj
-                            im_padded[i, ci, stride * hj + hi, stride * wj + wi] += col[r, c]
+                            im_padded[i, stride * hj + hi, stride * wj + wi,ci] += col[c, r]
     
     if padding > 0:
-        return im_padded[:, :, padding:-padding, padding:-padding]
+        return im_padded[:,padding:-padding, padding:-padding, :]
     return im_padded
 
 @cython.boundscheck(False)
