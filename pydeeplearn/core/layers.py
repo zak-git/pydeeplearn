@@ -209,7 +209,7 @@ class FC(Op):
         w = Param.randn((np.prod(shp[1:]), ndim))
         b = Param.zeros((ndim,))
         self._input = [input, w, b]
-        self._value = np.empty((shp[0], ndim), dtype=DTYPE)
+        self._value = np.empty((shp[0],ndim), dtype=DTYPE)
         self._gradient = np.zeros(self._value.shape, dtype=DTYPE)
     
     def forward(self):
@@ -219,9 +219,9 @@ class FC(Op):
         self._gradient = np.zeros(self._value.shape, dtype=DTYPE)
     
     def backward(self):
-        self._input[0]._gradient += self._gradient.dot(self._input[1]._value.T).reshape(self._input[0]._gradient.shape)
+        self._input[0]._gradient += np.dot(self._gradient,self._input[1]._value.T).reshape(self._input[0]._gradient.shape)
         data = self._input[0]._value.reshape(self._input[0].shape[0], -1)
-        self._input[1]._gradient += data.T.dot(self._gradient)
+        self._input[1]._gradient += np.dot(data.T,self._gradient)
         self._input[2]._gradient += self._gradient.sum(axis=0)
 
 class Affine(FC):
@@ -234,8 +234,8 @@ class Affine(FC):
 class Conv(Op):
     def __init__(self, input, nfilters, window=5, stride=1):
         shp = input.shape
-        w = Param.randn((nfilters, window, window, shp[3]))
-        b = Param.zeros((nfilters))
+        w = Param.randn((shp[3],window, window,nfilters))
+        b = Param.zeros((1,nfilters))
         self._input = [input, w, b]
         self._window = window
         self._nfilters = nfilters
@@ -248,31 +248,31 @@ class Conv(Op):
         shp = self.shape
         
         # Reshape images to (count, channels, height, width), then apply im2col
-        im = self._input[0]._value.transpose((0, 3, 1, 2))
+        im = self._input[0]._value
         self._col = im2col(im, self._window, self._window, (self._window - 1) / 2, self._stride)
         
         # Now that all the windows are in matrix form, calculate w.dot(col) + b
-        w = self._input[1]._value.reshape(self._nfilters, -1)
-        b = self._input[2]._value.reshape(-1, 1)
-        self._value = np.dot(w, self._col) + b
+        w = self._input[1]._value.reshape(-1, self._nfilters)
+        b = self._input[2]._value.reshape(1,-1)
+        self._value = np.dot(self._col, w) + b
         
         # Reshape result from (nfilters, -1) to (count, height, width, nfilters)
-        self._value = self._value.reshape(shp[3], n, shp[1], shp[2]).transpose((1, 2, 3, 0))
+        self._value = self._value.reshape(n, shp[1], shp[2], shp[3])
         self._gradient = np.zeros(self._value.shape, dtype=DTYPE)
     
     def backward(self):
         # Reshape gradient to (nfilters, -1) and back-propagate through the dot product
-        gradient = self._gradient.transpose((3, 0, 1, 2)).reshape(self._nfilters, -1)
-        self._input[1]._gradient += gradient.dot(self._col.T).reshape(self._input[1]._gradient.shape)
-        self._input[2]._gradient += gradient.sum(axis=1)
+        gradient = self._gradient.reshape(-1,self._nfilters)
+        self._input[1]._gradient += np.dot(self._col.T,gradient).reshape(self._input[1]._gradient.shape)
+        self._input[2]._gradient += gradient.sum(axis=0)
         
         # The gradient w.r.t the images is similar, but we need to aggregate the results over the windows
-        w = self._input[1]._value.reshape(self._nfilters, -1)
+        w = self._input[1]._value.reshape(-1,self._nfilters)
         shp = self._input[0].shape
-        imgradient = col2im(w.T.dot(gradient), shp[0], shp[3], shp[1], shp[2], self._window, self._window, (self._window - 1) / 2, self._stride)
+        imgradient = col2im(np.dot(gradient,w.T), shp[0], shp[3], shp[1], shp[2], self._window, self._window, (self._window - 1) / 2, self._stride)
         
         # Reshape the result back to (count, height, width, channels)
-        self._input[0]._gradient += imgradient.transpose((0, 2, 3, 1))
+        self._input[0]._gradient += imgradient
 
 class Pool(Op):
     def __init__(self, input, window=2, stride=2):
@@ -285,7 +285,7 @@ class Pool(Op):
     
     def forward(self):
         n = self._input[0].shape[0]
-        shp = self.shape
+        shp = self.shap
         
         # Reshape images to (count, channels, height, width), then apply im2col
         im = self._input[0]._value.transpose((0, 3, 1, 2))
